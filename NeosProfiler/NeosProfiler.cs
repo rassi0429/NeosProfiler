@@ -17,7 +17,7 @@ namespace NeosProfiler
 
     public override void OnEngineInit()
     {
-      var harmony = new Harmony("com.kokoa.NeosProfiler");
+      var harmony = new Harmony("com.kka.NeosProfiler");
       harmony.PatchAll();
     }
 
