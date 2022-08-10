@@ -22,10 +22,6 @@ namespace NeosProfiler
     private static FieldInfo? currentlyUpdatingStackField;
     private static FieldInfo? updateIndexField;
 
-    private NeosProfiler()
-    {
-    }
-
     public override void OnEngineInit()
     {
       var harmony = new Harmony("com.kka.NeosProfiler");
