@@ -4,8 +4,10 @@ using NeosModLoader;
 using System;
 using BaseX;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.Timers;
 using Fleck;
 
 namespace NeosProfiler
@@ -24,12 +26,11 @@ namespace NeosProfiler
     private static FieldInfo? currentlyUpdatingStackField;
     private static FieldInfo? updateIndexField;
 
-    private static WebSocketServer wss;
-    private static List<IWebSocketConnection> allSockets;
+    private static WebSocketServer? wss;
+    private static List<IWebSocketConnection>? allSockets;
 
     public override void OnEngineInit()
     {
-      var harmony = new Harmony("com.kka.NeosProfiler");
       // When using reflection, you need to use static as much as possible because it damages the FPS!
       worldProperty = typeof(World).GetProperty("LastCommonUpdates")!;
       updateProperty = typeof(UpdateManager).GetProperty("CurrentlyUpdating")!;
@@ -58,6 +59,7 @@ namespace NeosProfiler
         BindingFlags.FlattenHierarchy |
         BindingFlags.SetField)!;
 
+      var harmony = new Harmony("com.kka.NeosProfiler");
       harmony.PatchAll();
 
       wss = new WebSocketServer("ws://0.0.0.0:8181");
@@ -67,6 +69,16 @@ namespace NeosProfiler
         socket.OnOpen = () => { allSockets.Add(socket); };
         socket.OnClose = () => { allSockets.Remove(socket); };
       });
+      var timer = new Timer(1000);
+      
+      timer.Elapsed += (sender, e) =>
+      {
+        foreach (var webSocketConnection in allSockets)
+        {
+          webSocketConnection.Send("Hi");
+        }
+      };
+      timer.Start();
     }
 
     [HarmonyPatch(typeof(UpdateManager), "RunUpdates")]
@@ -108,7 +120,9 @@ namespace NeosProfiler
                     var world = __instance.World;
                     worldProperty?.SetValue(world, world.LastCommonUpdates + 1);
                     updateProperty?.SetValue(__instance, updatable);
+                    var beforeTimeStamp = Stopwatch.GetTimestamp();
                     updatable.InternalRunUpdate();
+                    var updateTime = Stopwatch.GetTimestamp() - beforeTimeStamp;
                     updateProperty?.SetValue(__instance, null);
                   }
                 }
