@@ -4,7 +4,9 @@ using NeosModLoader;
 using System;
 using BaseX;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
+using Fleck;
 
 namespace NeosProfiler
 {
@@ -22,9 +24,13 @@ namespace NeosProfiler
     private static FieldInfo? currentlyUpdatingStackField;
     private static FieldInfo? updateIndexField;
 
+    private static WebSocketServer wss;
+    private static List<IWebSocketConnection> allSockets;
+
     public override void OnEngineInit()
     {
       var harmony = new Harmony("com.kka.NeosProfiler");
+      // When using reflection, you need to use static as much as possible because it damages the FPS!
       worldProperty = typeof(World).GetProperty("LastCommonUpdates")!;
       updateProperty = typeof(UpdateManager).GetProperty("CurrentlyUpdating")!;
       toUpdateField = typeof(UpdateManager).GetField("toUpdate",
@@ -52,8 +58,15 @@ namespace NeosProfiler
         BindingFlags.FlattenHierarchy |
         BindingFlags.SetField)!;
 
-
       harmony.PatchAll();
+
+      wss = new WebSocketServer("ws://0.0.0.0:8181");
+      allSockets = new List<IWebSocketConnection>();
+      wss.Start(socket =>
+      {
+        socket.OnOpen = () => { allSockets.Add(socket); };
+        socket.OnClose = () => { allSockets.Remove(socket); };
+      });
     }
 
     [HarmonyPatch(typeof(UpdateManager), "RunUpdates")]
@@ -167,12 +180,15 @@ namespace NeosProfiler
                     .Destroy();
                 }
               }
+
               updateProperty?.SetValue(__instance, null);
             }
+
             keyValuePair = updateBucketEnumerator.Current;
             __result = keyValuePair.Value == null;
           }
         }
+
         __result = true;
         return false;
       }
