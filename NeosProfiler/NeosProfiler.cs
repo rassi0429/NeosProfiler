@@ -1,4 +1,4 @@
-﻿using FrooxEngine;
+using FrooxEngine;
 using HarmonyLib;
 using NeosModLoader;
 using System;
@@ -140,7 +140,10 @@ namespace NeosProfiler
             }
             catch (Exception ex)
             {
-              currentlyUpdatingStack.Pop();
+              while (currentlyUpdatingStack.Count > 0)
+              {
+                currentlyUpdatingStack.Pop();
+              }
               const string text = "Exception when Updating object: ";
               var text2 = __instance.CurrentlyUpdating.ParentHierarchyToString();
               const string text3 = "\n\nException:\n";
