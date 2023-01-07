@@ -1,4 +1,4 @@
-using FrooxEngine;
+﻿using FrooxEngine;
 using HarmonyLib;
 using NeosModLoader;
 using System;
@@ -7,8 +7,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Timers;
 using Fleck;
+using System.Threading.Tasks;
 
 namespace NeosProfiler
 {
@@ -24,11 +26,18 @@ namespace NeosProfiler
     private static FieldInfo? toUpdateField;
     private static FieldInfo? updateBucketEnumeratorField;
     private static FieldInfo? currentlyUpdatingStackField;
+    private static FieldInfo? currentlyUpdating;
     private static FieldInfo? updateIndexField;
 
     private static WebSocketServer? wss;
     private static List<IWebSocketConnection>? allSockets;
 
+    private static Dictionary<string, long> componentTimeSumDictionary;
+    private static Dictionary<string, long> componentTimeMaxDictionary;
+    private static Dictionary<string, long> componentTimeMinDictionary;
+    private static Dictionary<string, int> componentTimeCountDictionary;
+
+    private static int count = 0; 
     public override void OnEngineInit()
     {
       // When using reflection, you need to use static as much as possible because it damages the FPS!
@@ -58,6 +67,17 @@ namespace NeosProfiler
         BindingFlags.GetField |
         BindingFlags.FlattenHierarchy |
         BindingFlags.SetField)!;
+      currentlyUpdating = typeof(UpdateManager).GetField("CurrentlyUpdating",
+        BindingFlags.NonPublic |
+        BindingFlags.Instance |
+        BindingFlags.GetField |
+        BindingFlags.FlattenHierarchy |
+        BindingFlags.SetField)!;
+      
+      componentTimeSumDictionary = new Dictionary<string, long>();
+      componentTimeMaxDictionary = new Dictionary<string, long>();
+      componentTimeMinDictionary = new Dictionary<string, long>();
+      componentTimeCountDictionary = new Dictionary<string, int>();
 
       var harmony = new Harmony("com.kka.NeosProfiler");
       harmony.PatchAll();
@@ -73,10 +93,30 @@ namespace NeosProfiler
       
       timer.Elapsed += (sender, e) =>
       {
-        foreach (var webSocketConnection in allSockets)
-        {
-          webSocketConnection.Send("Hi");
-        }
+          Task.Run(() =>
+          {
+              StringBuilder str = new StringBuilder();
+              foreach (KeyValuePair<string, long> keyValuePair in componentTimeSumDictionary)
+              {
+                // name sum min max count
+                  str.AppendFormat("${0}%{1}%{2}%{3}%{4}", new object[]
+                  {
+            keyValuePair.Key,
+            keyValuePair.Value,
+            componentTimeMinDictionary[keyValuePair.Key],
+            componentTimeMaxDictionary[keyValuePair.Key],
+            componentTimeCountDictionary[keyValuePair.Key]
+                  });
+              }
+
+              foreach (var webSocketConnection in allSockets)
+              {
+                  webSocketConnection.Send("#statistics#" + str.ToString());
+                  // webSocketConnection.Send(count + "");
+              }
+              componentTimeSumDictionary.Clear();
+              count++;
+          });   
       };
       timer.Start();
     }
@@ -120,10 +160,39 @@ namespace NeosProfiler
                     var world = __instance.World;
                     worldProperty?.SetValue(world, world.LastCommonUpdates + 1);
                     updateProperty?.SetValue(__instance, updatable);
-                    var beforeTimeStamp = Stopwatch.GetTimestamp();
+                    var timestamp = Stopwatch.GetTimestamp();
                     updatable.InternalRunUpdate();
-                    var updateTime = Stopwatch.GetTimestamp() - beforeTimeStamp;
+                    var num = Stopwatch.GetTimestamp() - timestamp;
                     updateProperty?.SetValue(__instance, null);
+                    try
+                    {
+                      long num2;
+                      if (componentTimeSumDictionary.TryGetValue(updatable.Name, out num2))
+                      {
+                        componentTimeSumDictionary[updatable.Name] = num2 + num;
+                        componentTimeCountDictionary[updatable.Name] += 1;
+                        if (componentTimeMaxDictionary[updatable.Name] < num)
+                        {
+                          componentTimeMaxDictionary[updatable.Name] = num;
+                        }
+
+                        if (componentTimeMinDictionary[updatable.Name] > num)
+                        {
+                          componentTimeMinDictionary[updatable.Name] = num;
+                        }
+                      }
+                      else
+                      {
+                        componentTimeSumDictionary.Add(updatable.Name, num);
+                        componentTimeMaxDictionary.Add(updatable.Name, num);
+                        componentTimeMinDictionary.Add(updatable.Name, num);
+                        componentTimeCountDictionary.Add(updatable.Name, 1);
+                      }
+                    }
+                    catch(Exception e)
+                    {
+                      Error("dictionary write error", e);
+                    }
                   }
                 }
 
@@ -142,7 +211,8 @@ namespace NeosProfiler
             {
               while (currentlyUpdatingStack.Count > 0)
               {
-                currentlyUpdatingStack.Pop();
+                var current = currentlyUpdatingStack.Pop();
+                currentlyUpdating?.SetValue(__instance,current);
               }
               const string text = "Exception when Updating object: ";
               var text2 = __instance.CurrentlyUpdating.ParentHierarchyToString();
